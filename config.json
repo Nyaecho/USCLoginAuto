@@ -1,0 +1,11 @@
+{
+    "setProperty":{
+        "Note": "Key is the name of the property, value is the path to the driver executable",
+        "Key": "webdriver.edge.driver",
+        "Value": "msedgedriver.exe"
+    },
+    "user": "*",
+    "password": "*",
+    "url_School":"210.43.112.9",
+    "url_Test":"www.baidu.com"
+}
