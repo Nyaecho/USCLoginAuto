@@ -1,0 +1,16 @@
+{
+  "target_ssid": "USCWIFI",
+  "auth_server": "210.43.112.9",
+  "UserCredentials": {
+    "username": "20244330424",
+    "password": "330424"
+  },
+  "check_network_stability": {
+    "tips": "这里存放检测网络连通性需要的参数，依次为 ping目标，ping次数，可以接受的丢包率百分比",
+    "target": "www.bing.com",
+    "count": 1,
+    "loss_threshold": 0.0
+  },
+  "cookie": "MTc2NDQyNDcxNnxEWDhFQVFMX2dBQUJFQUVRQUFBeV80QUFBUVp6ZEhKcGJtY01DZ0FJWTNOeVpsTmhiSFFHYzNSeWFXNW5EQklBRUdSMFJUbHpXVWREYzBaQ2FVWlZlR0U9fAG7E3dWILbeHUqynR0uKGiXON1811H9E3BYfJbp9j_0",
+  "csrf_token": "_BWRPANZ3lbLGbyL3dL11g4MCGA="
+}
