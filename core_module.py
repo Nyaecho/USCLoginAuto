@@ -457,9 +457,10 @@ def is_connected_wlan() -> bool:
             )
             
             # 只检查是否有"已连接"状态
-            if result.returncode == 0:
-                return "已连接" in result.stdout
-                
+            if result.returncode == 0 and "已连接" in result.stdout:
+                print("✅ 已重新连接到无线局域网")
+                return True
+            
         return False
         
     except Exception as e:
