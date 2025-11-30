@@ -56,16 +56,23 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
         count = stability_config.get("count", 1)
         loss_threshold = stability_config.get("loss_threshold", 0.0)
 
-        if not check_status(auth_server): # 初始状态检查
-            print("初始化认证状态：认证失效，正在重新登录...")
-            login(
-                auth_server=auth_server,
-                cookie_value=cookie,
-                csrf_token=csrf_token,
-                credentials=credentials
-            )
-        else:
-            print("初始化认证状态：认证有效")
+        try :
+            if not check_status(auth_server): # 初始状态检查
+                print("初始化认证状态：认证失效，正在重新登录...")
+                login(
+                    auth_server=auth_server,
+                    cookie_value=cookie,
+                    csrf_token=csrf_token,
+                    credentials=credentials
+                )
+            else:
+                print("初始化认证状态：认证有效")
+        except Exception as e:
+            if not is_connected_wlan():
+                print("❌ 未连接到无线局域网,等待连接")
+                time.sleep(60)
+            else :
+                raise
         while not stop_event.is_set():  # 关键！检查停止信号
             try:
                 if check_network_stability(target, count, loss_threshold) : 
@@ -91,11 +98,14 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
                             credentials=credentials
                         )
                     time.sleep(60)
-            except UserException.PingException as e:
+            except Exception as e:
                 if not is_connected_wlan():
                     print("❌ 未连接到无线局域网,等待连接")
                     time.sleep(60)
+                    is_connected_wlan()
                     continue   
+                else :
+                    raise
         print("⏹️ 核心线程收到停止信号，正在退出")
 
     except Exception as e:
