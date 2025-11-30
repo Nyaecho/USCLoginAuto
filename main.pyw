@@ -355,8 +355,7 @@ if __name__ == "__main__":
                 print("✅ 已连接到目标SSID，启动守护线程")
                 start_guardian()  # 真实启动核心线程！
             else:
-                print("⚠️ 未连接到目标SSID，守护线程未启动")
-                exit(0)
+                raise Exception(f"未连接到WLAN: {target_ssid}")
             tray = setup_tray()
             try:
                 run_with_exit_check(tray) 
@@ -365,7 +364,7 @@ if __name__ == "__main__":
                 shutdown_app()
         except Exception as e:
             get_root_tk()
-            messagebox.showerror("配置错误", f"无法读取配置文件:\n{e}")
+            messagebox.showerror("Start Error", f"出现了一点小错误:\n{e}")
             shutdown_app()
 
 

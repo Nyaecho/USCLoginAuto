@@ -10,6 +10,8 @@ import requests
 import json
 import os
 
+
+
 def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
     """核心线程必须监听 stop_event！"""
     try:
@@ -44,30 +46,44 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
         count = stability_config.get("count", 1)
         loss_threshold = stability_config.get("loss_threshold", 0.0)
 
+        if not check_status(auth_server): # 初始状态检查
+            print("认证失效，正在重新登录...")
+            login(
+                auth_server=auth_server,
+                cookie_value=cookie,
+                csrf_token=csrf_token,
+                credentials=credentials
+            )
         while not stop_event.is_set():  # 关键！检查停止信号
-            if check_network_stability(target, count, loss_threshold) : 
-                continue
-            else:
-                print("🔄 网络不稳定，尝试重新认证...")
-                if not check_status(auth_server):
-                    print("认证失效，正在重新登录...")
-                    login(
-                        auth_server=auth_server,
-                        cookie_value=cookie,
-                        csrf_token=csrf_token,
-                        credentials=credentials
-                    )
+            try:
+                if check_network_stability(target, count, loss_threshold) : 
+                    continue
                 else:
-                    print("认证有效，重新认证")
-                    logout(auth_server)
-                    time.sleep(10)
-                    login(
-                        auth_server=auth_server,
-                        cookie_value=cookie,
-                        csrf_token=csrf_token,
-                        credentials=credentials
-                    )
-                time.sleep(60)   
+                    print("🔄 网络不稳定，尝试重新认证...")
+                    if not check_status(auth_server):
+                        print("认证失效，正在重新登录...")
+                        login(
+                            auth_server=auth_server,
+                            cookie_value=cookie,
+                            csrf_token=csrf_token,
+                            credentials=credentials
+                        )
+                    else:
+                        print("认证有效，重新认证")
+                        logout(auth_server)
+                        time.sleep(10)
+                        login(
+                            auth_server=auth_server,
+                            cookie_value=cookie,
+                            csrf_token=csrf_token,
+                            credentials=credentials
+                        )
+                    time.sleep(60)
+            except UserException.PingException as e:
+                if not is_connected_wlan():
+                    print("❌ 未连接到无线局域网,等待连接")
+                    time.sleep(60)
+                    continue   
         print("⏹️ 核心线程收到停止信号，正在退出")
 
     except Exception as e:
@@ -96,19 +112,22 @@ def check_network_stability(target, count, loss_threshold):
             # Windows 输出中的丢包行示例：
             # 丢包率 = 20% (2/10 个)
             loss_pattern = r"(\d+)%.*丢失"
+            creation_flags = subprocess.CREATE_NO_WINDOW
         else:
             # Linux/Mac ping 命令
             cmd = ["ping", "-c", str(count), target]
             # Linux 输出中的丢包行示例：
             # 10 packets transmitted, 8 received, 20% packet loss
             loss_pattern = r"(\d+)%.*packet loss"
-        
+            # 阻止弹出控制台窗口
+            creation_flags = 0
         # 执行 ping 命令
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=count * 3 + 5  # 超时30秒
+            timeout=count * 3 + 5,  # 超时30秒
+            creationflags=creation_flags
         )
         
         if result.returncode != 0: # 非零返回码表示命令失败
@@ -120,7 +139,8 @@ def check_network_stability(target, count, loss_threshold):
         
         if match:
             loss_rate = float(match.group(1))
-            print(f"🌐 ping {target}: 丢包率 {loss_rate:.1f}%")
+            if loss_rate > 0.1:
+                print(f"🌐 ping {target}: 丢包率 {loss_rate:.1f}%")
             
             if loss_rate > loss_threshold:
                 return False
@@ -327,7 +347,6 @@ def login(auth_server,
         print("❌ 用户名或密码不能为空")
         return -1
 
-    print(credentials)
     try:
         # === 构造请求 ===
         url = f"http://{auth_server}/api/account/login"
@@ -407,3 +426,30 @@ def login(auth_server,
         raise UserException.LoginException(f"❌ 网络错误: {e}")
     except Exception as e:
         raise UserException.LoginException(f"❌ 未知错误: {e}")
+    
+def is_connected_wlan() -> bool:
+    """
+    当ping出现异常时，调用此函数检测是否连接到无线局域网
+    :return: bool: True = 已连接无线局域网, False = 未连接无线局域网
+    """
+    try:
+        if platform.system().lower() == "windows":
+            result = subprocess.run(
+                ["netsh", "wlan", "show", "interfaces"],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore',
+                timeout=3,
+                creationflags= subprocess.CREATE_NO_WINDOW
+            )
+            
+            # 只检查是否有"已连接"状态
+            if result.returncode == 0:
+                return "已连接" in result.stdout
+                
+        return False
+        
+    except Exception as e:
+        print(f"⚠️ WiFi 检测异常: {e}")
+        return False
