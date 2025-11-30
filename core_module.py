@@ -4,6 +4,7 @@ import re
 import queue
 import platform
 import subprocess
+from urllib.parse import urlparse
 import UserException
 import time
 import requests
@@ -24,6 +25,18 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
         # 读取需要的信息 - Cookie 和 CSRF Token
         cookie = config.get("cookie", "")
         csrf_token = config.get("csrf_token", "")
+
+        # 读取需要的信息 - 认证服务器地址
+        auth_server = config.get("auth_server", "")
+        
+        if auth_server.startswith(('http://', 'https://')):
+            parsed = urlparse(auth_server)
+            auth_server = parsed.hostname or parsed.netloc # 只取主机名部分
+            config["auth_server"] = auth_server
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2) 
+
+        
         if not cookie or not csrf_token:
             cookie, csrf_token = get_cookie_and_csrf()
             config["cookie"] = cookie
@@ -37,9 +50,6 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
         password = UserCredentials.get("password", "")
         credentials = (username, password)
 
-        # 读取需要的信息 - 认证服务器地址
-        auth_server = config.get("auth_server", "")
-
         # 读取需要的信息 - 网络稳定性检测参数
         stability_config = config.get("check_network_stability", {})
         target = stability_config.get("target", "www.bing.com")
@@ -47,13 +57,15 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
         loss_threshold = stability_config.get("loss_threshold", 0.0)
 
         if not check_status(auth_server): # 初始状态检查
-            print("认证失效，正在重新登录...")
+            print("初始化认证状态：认证失效，正在重新登录...")
             login(
                 auth_server=auth_server,
                 cookie_value=cookie,
                 csrf_token=csrf_token,
                 credentials=credentials
             )
+        else:
+            print("初始化认证状态：认证有效")
         while not stop_event.is_set():  # 关键！检查停止信号
             try:
                 if check_network_stability(target, count, loss_threshold) : 
