@@ -23,11 +23,14 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
             config = json.load(f)
 
         # 读取需要的信息 - Cookie 和 CSRF Token
-        cookie = config.get("cookie", "")
-        csrf_token = config.get("csrf_token", "")
+        key_config = config.get("key", {})
+        cookie = key_config.get("cookie", "")
+        csrf_token = key_config.get("csrf_token", "")
+        last_update = key_config.get("LastUpdate", "")
 
-        # 读取需要的信息 - 认证服务器地址
+        # 读取需要的信息 - 认证服务器地址 和 SSID
         auth_server = config.get("auth_server", "")
+        ssid = config.get("target_ssid")
         
         if auth_server.startswith(('http://', 'https://')):
             parsed = urlparse(auth_server)
@@ -36,11 +39,12 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2) 
 
-        
-        if not cookie or not csrf_token:
+        # 如果缺少 Cookie 或 CSRF Token，则获取并保存
+        if not cookie or not csrf_token or LastUpdate_check(last_update):
             cookie, csrf_token = get_cookie_and_csrf()
-            config["cookie"] = cookie
-            config["csrf_token"] = csrf_token
+            config["key"]["cookie"] = cookie
+            config["key"]["csrf_token"] = csrf_token
+            config["key"]["LastUpdate"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2) 
 
@@ -51,10 +55,21 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
         credentials = (username, password)
 
         # 读取需要的信息 - 网络稳定性检测参数
-        stability_config = config.get("check_network_stability", {})
-        target = stability_config.get("target", "www.bing.com")
-        count = stability_config.get("count", 1)
-        loss_threshold = stability_config.get("loss_threshold", 0.0)
+        network_config = config.get("check_network_stability", {})
+        network_config_ping = network_config.get("with_ping", {})
+        network_config_http = network_config.get("with_http", {})
+        if not network_config_ping.get("enabled", False):
+            network_config_ping = None
+        else:
+            target = network_config_ping.get("target", "202.89.233.100")
+            count = network_config_ping.get("count", 1)
+            loss_threshold = network_config_ping.get("loss_threshold", 0.0)
+        if not network_config_http.get("enabled", False):
+            network_config_http = None
+        else:
+            http_url = network_config_http.get("url", "http://connectivitycheck.platform.hicloud.com/generate_204")
+            timeout = network_config_http.get("timeout", 5)
+        
 
         try :
             if not check_status(auth_server): # 初始状态检查
@@ -68,41 +83,48 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
             else:
                 print("初始化认证状态：认证有效")
         except Exception as e:
-            if not is_connected_wlan():
+            if not is_connected_wlan(ssid):
                 print("❌ 未连接到无线局域网,等待连接")
                 time.sleep(60)
             else :
                 raise
         while not stop_event.is_set():  # 关键！检查停止信号
             try:
-                if check_network_stability(target, count, loss_threshold) : 
-                    continue
+                if not (network_config_ping is None):  
+                    if check_network_stability_ping(target, count, loss_threshold):
+                        continue
+                elif not (network_config_http is None):
+                    if check_network_stability_http(http_url, timeout):
+                        continue
                 else:
-                    print("🔄 网络不稳定，尝试重新认证...")
-                    if not check_status(auth_server):
-                        print("认证失效，正在重新登录...")
-                        login(
-                            auth_server=auth_server,
-                            cookie_value=cookie,
-                            csrf_token=csrf_token,
-                            credentials=credentials
-                        )
-                    else:
-                        print("认证有效，重新认证")
-                        logout(auth_server)
-                        time.sleep(10)
-                        login(
-                            auth_server=auth_server,
-                            cookie_value=cookie,
-                            csrf_token=csrf_token,
-                            credentials=credentials
-                        )
-                    time.sleep(60)
+                    if check_status(auth_server):
+                        continue
+                
+                print("🔄 网络不稳定，尝试重新认证...")
+                if not check_status(auth_server):
+                    print("认证失效，正在重新登录...")
+                    login(
+                        auth_server=auth_server,
+                        cookie_value=cookie,
+                        csrf_token=csrf_token,
+                        credentials=credentials
+                    )
+                else:
+                    print("认证有效，重新认证")
+                    logout(auth_server)
+                    time.sleep(10)
+                    login(
+                        auth_server=auth_server,
+                        cookie_value=cookie,
+                        csrf_token=csrf_token,
+                        credentials=credentials
+                    )
+                time.sleep(60)
             except Exception as e:
-                if not is_connected_wlan():
+                if not is_connected_wlan(ssid):
                     print("❌ 未连接到无线局域网,等待连接")
                     time.sleep(60)
-                    is_connected_wlan()
+                    is_connected_wlan(ssid)
                     continue   
                 else :
                     raise
@@ -112,7 +134,7 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
         task_queue.put(e)
         raise
 
-def check_network_stability(target, count, loss_threshold):
+def check_network_stability_ping(target, count, loss_threshold):
     """
     检测网络稳定性
 
@@ -449,7 +471,7 @@ def login(auth_server,
     except Exception as e:
         raise UserException.LoginException(f"❌ 未知错误: {e}")
     
-def is_connected_wlan() -> bool:
+def is_connected_wlan(SSID: str) -> bool:
     """
     当ping出现异常时，调用此函数检测是否连接到无线局域网
     :return: bool: True = 已连接无线局域网, False = 未连接无线局域网
@@ -468,11 +490,53 @@ def is_connected_wlan() -> bool:
             
             # 只检查是否有"已连接"状态
             if result.returncode == 0 and "已连接" in result.stdout:
-                print("✅ 已重新连接到无线局域网")
-                return True
+                for line in result.stdout.splitlines():
+                    if re.match(r"^\s*SSID\s*:", line, flags=re.IGNORECASE):
+                        ssid = line.split(":", 1)[1].strip()
+                        print(f"✔️ 已连接无线局域网: {ssid}")
+                        return ssid == SSID
+            return False
             
         return False
         
     except Exception as e:
         print(f"⚠️ WiFi 检测异常: {e}")
         return False
+    
+# 传入时间戳，并对比时间戳与当前的时间差，判断是否需要更新
+def LastUpdate_check(LastUpdate: str) -> bool:
+    if not LastUpdate:
+        return True
+    try:
+        last_time = time.mktime(time.strptime(LastUpdate, "%Y-%m-%d %H:%M:%S"))
+        current_time = time.time()
+        # 如果时间差超过24*7小时，返回True
+        if current_time - last_time > 24 * 7 * 3600:
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"⚠️ 时间戳解析异常: {e}")
+        return True
+    
+def check_network_stability_http(http_url, timeout=5):
+    """
+    通过 HTTP HEAD 请求检测网络连通性
+    比 ping 更准确，因为直接测试实际使用的协议
+    """
+    try:
+        # HEAD 请求比 GET 更轻量（只返回头部）
+        response = requests.head(
+            http_url,
+            timeout=timeout,
+            allow_redirects=False # 不允许重定向
+        )
+        # 只要能建立连接并收到响应，就认为网络正常
+        if response.status_code in [200, 400, 401, 403, 404, 204]:
+            return True
+        else:
+            print(f"🌐 HTTP 检测异常状态码: {response.status_code}")
+            return False
+        
+    except requests.exceptions.RequestException:
+        raise UserException.HTTPCheckException("❌ HTTP 网络检测出错啦")
