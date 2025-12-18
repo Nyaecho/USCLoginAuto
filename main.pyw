@@ -313,20 +313,31 @@ if __name__ == "__main__":
     if not os.path.exists(config_path):
         default_config = {
             "target_ssid": "Your_SSID_Here",
-            "auth_server": "",
+            "auth_server": "Your_Auth_Server_Here",
             "UserCredentials": {
-                "username": "Your_Username_Here",
-                "password": "Your_Password_Here"
+                "username": "your_username_here",
+                "password": "your_password_here"
             },
             "check_network_stability": {
+                "with_ping": {
+                "enabled": False,
                 "tips": "这里存放检测网络连通性需要的参数，依次为 ping目标，ping次数，可以接受的丢包率百分比",
-                "target": "www.bing.com",
-                "count": 1, 
-                "loss_threshold": 0.0
+                "target": "202.89.233.100",
+                "count": 10,
+                "loss_threshold": 50.0
+                },
+                "with_http": {
+                "enabled": True,
+                "tips": "这里存放检测网络连通性需要的参数，依次为 目标URL，超时时间（秒）",
+                "target_url": "http://connectivitycheck.platform.hicloud.com/generate_204",
+                "timeout": 5
+                }
             },
-            "cookie": "",
-            "csrf_token": ""
-            
+            "key": {
+                "cookie": "这里会自动获取",
+                "csrf_token": "这里会自动获取",
+                "LastUpdate": "1999-01-01 00:00:00"
+            }
         }
         try:
             with open(config_path, "w", encoding="utf-8") as f:
