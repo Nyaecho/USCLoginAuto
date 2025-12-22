@@ -109,6 +109,10 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
                     time.sleep(60)
                     if is_connected_wlan(ssid):
                         break
+                continue
+            except requests.exceptions.RequestException:
+                print("⚠️ 网络出现不可达错误，30s后重试")
+                time.sleep(30)
                 continue   
         print("⏹️ 核心线程收到停止信号，正在退出")
     
