@@ -58,49 +58,33 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
         network_config = config.get("check_network_stability", {})
         network_config_ping = network_config.get("with_ping", {})
         network_config_http = network_config.get("with_http", {})
-        if not network_config_ping.get("enabled", False):
-            network_config_ping = None
-        else:
+        data = {"auth_server": auth_server}
+        type = ""
+        if network_config_ping.get("enabled", False):
             target = network_config_ping.get("target", "202.89.233.100")
             count = network_config_ping.get("count", 1)
             loss_threshold = network_config_ping.get("loss_threshold", 0.0)
-        if not network_config_http.get("enabled", False):
-            network_config_http = None
+            data = {"target": target,"count": count,"loss_threshold": loss_threshold}
+            type = "ping"
         else:
-            http_url = network_config_http.get("url", "http://connectivitycheck.platform.hicloud.com/generate_204")
-            timeout = network_config_http.get("timeout", 5)
-        
-
-        try :
-            if not check_status(auth_server): # 初始状态检查
-                print("初始化认证状态：认证失效，正在重新登录...")
-                login(
-                    auth_server=auth_server,
-                    cookie_value=cookie,
-                    csrf_token=csrf_token,
-                    credentials=credentials
-                )
+            network_config_ping = None
+            if network_config_http.get("enabled", False):
+                http_url = network_config_http.get("url", "http://connectivitycheck.platform.hicloud.com/generate_204")
+                timeout = network_config_http.get("timeout", 10)
+                data = {"http_url": http_url,"timeout": timeout}
+                type = "http"
             else:
-                print("初始化认证状态：认证有效")
-        except Exception as e:
-            if not is_connected_wlan(ssid):
-                print("❌ 未连接到无线局域网,等待连接")
-                time.sleep(60)
-            else :
-                raise
+                network_config_http = None
+        
         while not stop_event.is_set():  # 关键！检查停止信号
             try:
-                if not (network_config_ping is None):  
-                    if check_network_stability_ping(target, count, loss_threshold):
-                        continue
-                elif not (network_config_http is None):
-                    if check_network_stability_http(http_url, timeout):
-                        continue
-                else:
-                    if check_status(auth_server):
-                        continue
+                if check_network(type, **data) :
+                    time.sleep(60)
+                    continue
                 
                 print("🔄 网络不稳定，尝试重新认证...")
+                if not is_connected_wlan(ssid):
+                    raise UserException.CheckWlanException
                 if not check_status(auth_server):
                     print("认证失效，正在重新登录...")
                     login(
@@ -120,16 +104,14 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
                         credentials=credentials
                     )
                 time.sleep(60)
-            except Exception as e:
-                if not is_connected_wlan(ssid):
-                    print("❌ 未连接到无线局域网,等待连接")
+            except UserException.CheckWlanException as e:
+                while(1):
                     time.sleep(60)
-                    is_connected_wlan(ssid)
-                    continue   
-                else :
-                    raise
+                    if is_connected_wlan(ssid):
+                        break
+                continue   
         print("⏹️ 核心线程收到停止信号，正在退出")
-
+    
     except Exception as e:
         task_queue.put(e)
         raise
@@ -297,7 +279,8 @@ def check_status(auth_server):
             raise UserException.getStatusException(f"⚠️ 状态检测返回 HTTP {response.status_code}")
             
     except requests.exceptions.Timeout:
-        raise requests.exceptions.Timeout("⏰ 请求超时")
+        print("⏰ 状态检测请求超时")
+        return False
     except requests.exceptions.RequestException as e:
         raise requests.exceptions.RequestException(f"❌ 网络错误: {e}")
     except UserException.getStatusException as e:
@@ -495,7 +478,9 @@ def is_connected_wlan(SSID: str) -> bool:
                         ssid = line.split(":", 1)[1].strip()
                         print(f"✔️ 已连接无线局域网: {ssid}")
                         return ssid == SSID
-            return False
+            else : 
+                print("❌ 未连接到无线局域网,等待连接")
+                return False
             
         return False
         
@@ -540,3 +525,17 @@ def check_network_stability_http(http_url, timeout=5):
         
     except requests.exceptions.RequestException:
         raise UserException.HTTPCheckException("❌ HTTP 网络检测出错啦")
+    
+def check_network(type: str = "", **data) -> bool:
+    """
+    简单的网络连通性检测
+    """
+    try:
+        if type == "ping":  
+            return check_network_stability_ping(data.get("target"), data.get("count"), data.get("loss_threshold"))
+        elif type == "http":
+            return check_network_stability_http(data.get("http_url"), data.get("timeout", 10))
+        else:
+            return check_status(data.get("auth_server"))
+    except Exception as e:
+        raise e

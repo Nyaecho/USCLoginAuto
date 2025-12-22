@@ -25,3 +25,7 @@ class LoginException(Exception):
 class HTTPCheckException(Exception):
     """Custom exception for HTTP check-related errors."""
     pass
+
+class CheckWlanException(Exception):
+    """Custom exception for WLAN check-related errors."""
+    pass
