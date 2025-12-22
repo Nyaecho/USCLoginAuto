@@ -9,6 +9,7 @@ _guardian_thread = None
 _guardian_running = False
 # 新增：全局停止信号（用于优雅退出所有线程）
 _stop_all = threading.Event()
+restartNum = 0
 
 def _guardian_worker(core_task_func):
     """保活监控器的工作线程"""
@@ -35,7 +36,10 @@ def _guardian_worker(core_task_func):
     while _guardian_running and not _stop_all.is_set():
         # 检查核心线程是否存活
         if core_thread is None or not core_thread.is_alive():
-            print("⚠️ 核心线程已停止，正在重启...")
+            global restartNum
+            restartNum += 1
+            print(f"⚠️ 核心线程已停止，5s后重启... (重启次数: {restartNum})")
+            time.sleep(5)
             start_core()
 
         # 可选：检查状态队列（非阻塞）
