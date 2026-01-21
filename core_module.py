@@ -12,9 +12,9 @@ import json
 import os
 
 
-
-def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
+def core_task(task_queue: "queue.Queue", stop_event: threading.Event): # 传参： task_queue 用于传递异常， stop_event 用于监听停止信号
     """核心线程必须监听 stop_event！"""
+    global cookie, csrf_token, auth_server, credentials
     try:
         print("⚙️ 自动认证服务启动")
         config_path = os.path.join(os.path.dirname(__file__), "config.json")
@@ -75,9 +75,14 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
                 type = "http"
             else:
                 network_config_http = None
-        
+        print("✔️核心线程配置导入完成")
+        flag = 0
         while not stop_event.is_set():  # 关键！检查停止信号
             try:
+                if flag >= 10:
+                    print("ℹ️ 长时间网络稳定，继续保持监测中...")
+                    flag = 0
+                flag += 1
                 if check_network(type, **data) :
                     time.sleep(60)
                     continue
@@ -113,7 +118,11 @@ def core_task(task_queue: "queue.Queue", stop_event: threading.Event):
             except requests.exceptions.RequestException:
                 print("⚠️ 网络出现不可达错误，30s后重试")
                 time.sleep(30)
-                continue   
+                continue
+            except UserException.LoginException :
+                print(f"❌ 登录失败: 认证服务器不可达，10s后重试")
+                time.sleep(10)
+                continue
         print("⏹️ 核心线程收到停止信号，正在退出")
     
     except Exception as e:
@@ -292,7 +301,7 @@ def check_status(auth_server):
     except Exception as e:
         raise Exception(f"❌ 未知错误: {e}")
 
-def logout(auth_server="210.43.112.9"):
+def logout(auth_server):
     """
     执行校园网登出操作
     警告: 该函数可能抛出 UserException.LoginOutException, 需要调用方处理.
@@ -527,7 +536,7 @@ def check_network_stability_http(http_url, timeout=5):
             print(f"🌐 HTTP 检测异常状态码: {response.status_code}")
             return False
         
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException: # 任何请求异常都视为网络不稳定
         raise UserException.HTTPCheckException("❌ HTTP 网络检测出错啦")
     
 def check_network(type: str = "", **data) -> bool:
@@ -541,5 +550,22 @@ def check_network(type: str = "", **data) -> bool:
             return check_network_stability_http(data.get("http_url"), data.get("timeout", 10))
         else:
             return check_status(data.get("auth_server"))
+    except UserException.HTTPCheckException :
+        print("❌ HTTP 网络检测出错啦!可能是外网不可达！")
+        return False
     except Exception as e:
         raise e
+
+def re_auth():
+    """
+    触发重新认证请求
+    """
+    logout(auth_server)
+    time.sleep(2)
+    login(
+        auth_server=auth_server,
+        cookie_value=cookie,
+        csrf_token=csrf_token,
+        credentials=credentials
+    )
+    time.sleep(10)
