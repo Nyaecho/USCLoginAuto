@@ -18,7 +18,7 @@ def _guardian_worker(core_task_func):
     core_thread = None # 核心线程引用
 
     def start_core():
-        nonlocal core_thread 
+        nonlocal core_thread
         # 使用全局停止事件，不再使用局部 stop_event
         core_thread = threading.Thread(
             target=core_task_func, # 核心任务函数
@@ -44,7 +44,7 @@ def _guardian_worker(core_task_func):
 
         # 可选：检查状态队列（非阻塞）
         try:
-            msg = task_queue.get_nowait() 
+            msg = task_queue.get_nowait()  # 检查核心线程传来的消息
             if isinstance(msg, Exception):
                 print(f"💥 核心线程抛出异常: {msg}")
                 # 可在这里记录日志或告警
@@ -54,13 +54,13 @@ def _guardian_worker(core_task_func):
         time.sleep(3)  # 每3秒检查一次
 
     # 清理：触发全局停止并等待核心线程优雅退出
-    _stop_all.set()
+    _stop_all.set() 
     if core_thread and core_thread.is_alive():
         core_thread.join(timeout=2)
     print("🛑 保活线程已退出")
 
 
-def start_guardian(core_module_path="core_module", core_func_name="core_task"):
+def start_guardian(core_module_path, core_func_name):
     """
     启动保活线程（供外部调用）
     
@@ -95,13 +95,6 @@ def start_guardian(core_module_path="core_module", core_func_name="core_task"):
     _guardian_thread.start()
     print("🛡️ 保活线程启动OK")
 
-
-def stop_guardian():
-    """可选：提供停止接口"""
-    global _guardian_running
-    # 设置运行标志为 False，并触发全局停止事件
-    _guardian_running = False
-    _stop_all.set()
 
 # 新增：通知所有线程退出（供主线程在退出前调用）
 def request_stop():
