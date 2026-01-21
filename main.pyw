@@ -14,6 +14,7 @@ import platform
 import re
 from guardian import start_guardian, request_stop
 import json
+from core_module import re_auth
 
 
 # === 全局唯一 Tk 根窗口 ===
@@ -98,8 +99,9 @@ class LogWindow:
         self.window = None
         self.text_area = None
         self._auto_refresh_job = None
-        self._auto_refresh_enabled = True  # 新增：开关状态
-        self.toggle_btn = None  # 新增：按钮引用
+        self._auto_refresh_enabled = True  # 开关状态
+        self.toggle_btn = None  # 按钮引用
+        self.reauth = None  # 重新认证线程引用
 
     def show(self):
         root = get_root_tk()
@@ -137,6 +139,7 @@ class LogWindow:
         )
         self.toggle_btn.pack(side=tk.LEFT, padx=5)
 
+        tk.Button(btn_frame, text="🔄 重新认证", command=self.trigger_reauth).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="💾 保存日志为 TXT", command=self.save_log).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="🧹 清空日志", command=self.clear_log).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="🛑 退出程序", bg="#ff6b6b", fg="white", command=self.quit_app).pack(side=tk.RIGHT, padx=5)
@@ -150,17 +153,17 @@ class LogWindow:
             self._stop_auto_refresh()
 
     def _start_auto_refresh(self):
-        # 窗口可见时每 500ms 刷新一次
+        # 窗口可见时每 50ms 刷新一次
         if not self.window or not self.window.winfo_exists():
             return
         if self._auto_refresh_job is None and self._auto_refresh_enabled:
             def tick():
                 if self.window and self.window.winfo_exists() and self.window.state() != "withdrawn" and self._auto_refresh_enabled:
                     self._refresh_log()
-                    self._auto_refresh_job = self.window.after(500, tick)
+                    self._auto_refresh_job = self.window.after(50, tick)
                 else:
                     self._auto_refresh_job = None
-            self._auto_refresh_job = self.window.after(500, tick)
+            self._auto_refresh_job = self.window.after(50, tick)
 
     def _stop_auto_refresh(self):
         if self.window and self._auto_refresh_job is not None:
@@ -215,6 +218,15 @@ class LogWindow:
             self.toggle_btn.config(
                 text=("⏸ 暂停自动刷新" if self._auto_refresh_enabled else "▶️ 继续自动刷新")
             )
+
+    def trigger_reauth(self):
+        if self.reauth is None or not self.reauth.is_alive():
+            print("🔄 已触发重新认证请求")
+            self.reauth = threading.Thread(target=re_auth, daemon=True, name="ReAuthThread")
+            self.reauth.start()
+        else:
+            print("ℹ️ 别急！")
+        
 
 # === 托盘图标 ===
 def create_icon():
@@ -289,8 +301,15 @@ def SSIDChecker(SSID: str) -> bool :
             codepage = m.group(1).decode("ascii") if m else "65001"
             encoding = f"cp{codepage}"
 
+            # 添加连接检测，确保在设备连接到无线网的前提下进行 SSID 检测
+
             raw = subprocess.check_output("netsh wlan show interfaces", shell=True)
             output = raw.decode(encoding, errors="ignore")
+            for _ in range(10):
+                if "State                   : connected" not in output: # 未连接无线网络
+                    time.sleep(1)
+                else:
+                    break
 
             # 只解析以 'SSID' 开头的字段，避免误匹配 'BSSID'
             for line in output.splitlines():
@@ -307,6 +326,7 @@ def SSIDChecker(SSID: str) -> bool :
 
 # === 主程序 ===
 if __name__ == "__main__":
+    tray = setup_tray()
     print("校园网守护程序启动ing...")
     #检查有无config.json,没有就创建一个默认,并弹窗报错
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
@@ -363,11 +383,10 @@ if __name__ == "__main__":
             if not auth_server:
                 raise ValueError("认证服务器地址不能为空")
             if SSIDChecker(target_ssid):
-                print("✅ 已连接到目标SSID，启动守护线程")
-                start_guardian()  # 真实启动核心线程！
+                print("✅ 条件验证完成")
+                start_guardian("core_module", "core_task")  # 真实启动核心线程！
             else:
                 raise Exception(f"未连接到WLAN: {target_ssid}")
-            tray = setup_tray()
             try:
                 run_with_exit_check(tray) 
             except KeyboardInterrupt:
