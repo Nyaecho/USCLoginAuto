@@ -10,6 +10,7 @@
 #include "LogWindow.h"
 #include "Logger.h"
 #include "NetworkMonitor.h"
+#include "SingleInstance.h"
 #include "TrayController.h"
 #include "WlanChecker.h"
 
@@ -124,7 +125,7 @@ void shutdownApp(usc::CoreWorker* worker) {
     QApplication::quit();
 }
 
-int runGui(QApplication& app, const std::string& exeDir) {
+int runGui(QApplication& app, const std::string& exeDir, usc::SingleInstance& guard) {
     // config.json 与 exe 同目录（对齐 Python os.path.dirname(__file__)）
     const std::string cfgPath = exeDir + "/config.json";
 
@@ -178,6 +179,10 @@ int runGui(QApplication& app, const std::string& exeDir) {
     QObject::connect(tray, &usc::TrayController::showLogRequested, logWindow,
                      &usc::LogWindow::showAndActivate);
 
+    // 单实例激活：重复启动 exe 时弹出日志窗口
+    QObject::connect(&guard, &usc::SingleInstance::activationRequested, logWindow,
+                     &usc::LogWindow::showAndActivate);
+
     usc::log("校园网守护程序已启动");
     return app.exec();
 }
@@ -200,6 +205,16 @@ int main(int argc, char* argv[]) {
         if (arg == "--e2e") return runE2E(app, exeDir, argc, argv);
     }
 
-    return runGui(app, exeDir);
+    // --- 单实例守护：重复启动时通知已有实例弹窗，自身退出 ---
+    usc::SingleInstance guard("USC-Auto-SingleInstance");
+    if (!guard.isPrimary()) {
+        guard.notifyExisting();
+        return 0;
+    }
+
+    int rc = runGui(app, exeDir, guard);
+
+    // 主实例退出时由 guard 析构关闭服务端；显式断开以防退出竞态
+    return rc;
 }
 
