@@ -10,6 +10,7 @@ dist/
 *.exe
 *.dll
 smoke_result.txt
+*.zip
 
 # === Python 封存分支遗留 ===
 __pycache__/
