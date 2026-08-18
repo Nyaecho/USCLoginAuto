@@ -11,6 +11,10 @@ dist/
 *.dll
 smoke_result.txt
 
+# === 发布产物例外（dist/ 整体入库供直接下载）===
+!usc-auto-cpp/dist/
+!usc-auto-cpp/dist/**
+
 # === Python 封存分支遗留 ===
 __pycache__/
 *.pyc

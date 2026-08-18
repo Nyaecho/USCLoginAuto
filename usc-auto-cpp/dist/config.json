@@ -1,0 +1,28 @@
+{
+  "UserCredentials": {
+    "password": "111111",
+    "username": "usc"
+  },
+  "auth_server": "210.43.112.9",
+  "check_network_stability": {
+    "with_http": {
+      "enabled": false,
+      "target_url": "http://connectivitycheck.platform.hicloud.com/generate_204",
+      "timeout": 10,
+      "tips": "这里存放检测网络连通性需要的参数，依次为 目标URL，超时时间（秒），可以接受的失败率百分比"
+    },
+    "with_ping": {
+      "count": 10,
+      "enabled": false,
+      "loss_threshold": 50.0,
+      "target": "202.89.233.100",
+      "tips": "这里存放检测网络连通性需要的参数，依次为 ping目标，ping次数，可以接受的丢包率百分比"
+    }
+  },
+  "key": {
+    "LastUpdate": "2026-08-18 17:47:26",
+    "cookie": "MTc4NzA0NjQ2NnxEWDhFQVFMX2dBQUJFQUVRQUFBeV80QUFBUVp6ZEhKcGJtY01DZ0FJWTNOeVpsTmhiSFFHYzNSeWFXNW5EQklBRUZkRWNVazNiVlJOT1hObFJIUlRlbVE9fMlImmrRQc5-cJaE36ofGc0I5LPF8VswQfuyog6N91o2",
+    "csrf_token": "fw4d3fuFN0-0bozTDrm3PQPdxLk="
+  },
+  "target_ssid": ""
+}
