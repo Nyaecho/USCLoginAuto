@@ -16,7 +16,7 @@ if(WIN32)
   add_compile_options(-mwindows)
 endif()
 
-# Qt: 禁用 moc 对 MOC 特性的依赖猜测
+# Qt: AUTOMOC 开启（头文件含 Q_OBJECT 的 moc 生成）
 set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
@@ -33,7 +33,21 @@ add_executable(usc-auto WIN32
   src/CoreWorker.cpp
   src/LogWindow.cpp
   src/TrayController.cpp
+  # 头文件必须列入目标，AUTOMOC 才会处理含 Q_OBJECT 的头（挪到 include/ 后必需）
+  include/exceptions.h
+  include/Logger.h
+  include/AppConfig.h
+  include/WlanChecker.h
+  include/NetworkMonitor.h
+  include/AuthClient.h
+  include/CoreWorker.h
+  include/LogWindow.h
+  include/TrayController.h
 )
+
+# 头文件目录（cpp 中 #include "Xxx.h" 直接引用，无需相对路径）
+# AUTOMOC 默认只扫源文件目录；include/ 路径让 moc 也能找到含 Q_OBJECT 的头文件
+target_include_directories(usc-auto BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 target_link_libraries(usc-auto PRIVATE
   Qt6::Widgets
