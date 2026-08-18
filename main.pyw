@@ -290,7 +290,8 @@ def shutdown_app():
 # === SSID 检测函数 ===
 def SSIDChecker(SSID: str) -> bool :
     target_ssid = SSID
-
+    if target_ssid == "":
+        return True  # 没有指定SSID，默认通过检查
     system_platform = platform.system()
 
     if system_platform == "Windows":
@@ -378,8 +379,6 @@ if __name__ == "__main__":
             auth_server = config.get("auth_server", "")
             if not UserCredentials.get("username") or not UserCredentials.get("password"):
                 raise ValueError("用户名或密码不能为空")
-            if not target_ssid:
-                raise ValueError("目标SSID不能为空")
             if not auth_server:
                 raise ValueError("认证服务器地址不能为空")
             if SSIDChecker(target_ssid):

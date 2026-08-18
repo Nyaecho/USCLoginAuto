@@ -11,70 +11,84 @@ import requests
 import json
 import os
 
+config_path = os.path.join(os.path.dirname(__file__), "config.json") # 配置文件路径
+cookie = "" # yudear cookie 值
+csrf_token = "" # CSRF Token 值
+auth_server = "" # 认证服务器地址
+credentials = ("", "") # (用户名, 密码) 元组
+
+
+def load_config_from_file():
+    """读取配置文件并初始化核心配置变量。"""
+    global cookie, csrf_token, auth_server, credentials
+
+    # 读取配置
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    # 读取需要的信息 - Cookie 和 CSRF Token
+    key_config = config.get("key", {})
+    cookie = key_config.get("cookie", "")
+    csrf_token = key_config.get("csrf_token", "")
+    last_update = key_config.get("LastUpdate", "")
+
+    # 读取需要的信息 - 认证服务器地址 和 SSID
+    auth_server = config.get("auth_server", "")
+    ssid = config.get("target_ssid", "")
+
+    if auth_server.startswith(('http://', 'https://')):
+        parsed = urlparse(auth_server)
+        auth_server = parsed.hostname or parsed.netloc # 只取主机名部分
+        config["auth_server"] = auth_server
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+
+    # 如果缺少 Cookie 或 CSRF Token，则获取并保存
+    if not cookie or not csrf_token or LastUpdate_check(last_update):
+        cookie, csrf_token = get_cookie_and_csrf()
+        config["key"]["cookie"] = cookie
+        config["key"]["csrf_token"] = csrf_token
+        config["key"]["LastUpdate"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+
+    # 读取需要的信息 - 账号密码
+    UserCredentials = config.get("UserCredentials", {})
+    username = UserCredentials.get("username", "")
+    password = UserCredentials.get("password", "")
+    credentials = (username, password)
+
+    # 读取需要的信息 - 网络稳定性检测参数
+    network_config = config.get("check_network_stability", {})
+    network_config_ping = network_config.get("with_ping", {})
+    network_config_http = network_config.get("with_http", {})
+    data = {"auth_server": auth_server}
+    type = ""
+    if network_config_ping.get("enabled", False):
+        target = network_config_ping.get("target", "202.89.233.100")
+        count = network_config_ping.get("count", 1)
+        loss_threshold = network_config_ping.get("loss_threshold", 0.0)
+        data = {"target": target,"count": count,"loss_threshold": loss_threshold}
+        type = "ping"
+    else:
+        network_config_ping = None
+        if network_config_http.get("enabled", False):
+            http_url = network_config_http.get("url", "http://connectivitycheck.platform.hicloud.com/generate_204")
+            timeout = network_config_http.get("timeout", 10)
+            data = {"http_url": http_url,"timeout": timeout}
+            type = "http"
+        else:
+            network_config_http = None
+
+    return ssid, type, data
+
 
 def core_task(task_queue: "queue.Queue", stop_event: threading.Event): # 传参： task_queue 用于传递异常， stop_event 用于监听停止信号
     """核心线程必须监听 stop_event！"""
     global cookie, csrf_token, auth_server, credentials
     try:
         print("⚙️ 自动认证服务启动")
-        config_path = os.path.join(os.path.dirname(__file__), "config.json")
-        # 读取配置
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = json.load(f)
-
-        # 读取需要的信息 - Cookie 和 CSRF Token
-        key_config = config.get("key", {})
-        cookie = key_config.get("cookie", "")
-        csrf_token = key_config.get("csrf_token", "")
-        last_update = key_config.get("LastUpdate", "")
-
-        # 读取需要的信息 - 认证服务器地址 和 SSID
-        auth_server = config.get("auth_server", "")
-        ssid = config.get("target_ssid")
-        
-        if auth_server.startswith(('http://', 'https://')):
-            parsed = urlparse(auth_server)
-            auth_server = parsed.hostname or parsed.netloc # 只取主机名部分
-            config["auth_server"] = auth_server
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2) 
-
-        # 如果缺少 Cookie 或 CSRF Token，则获取并保存
-        if not cookie or not csrf_token or LastUpdate_check(last_update):
-            cookie, csrf_token = get_cookie_and_csrf()
-            config["key"]["cookie"] = cookie
-            config["key"]["csrf_token"] = csrf_token
-            config["key"]["LastUpdate"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2) 
-
-        # 读取需要的信息 - 账号密码
-        UserCredentials = config.get("UserCredentials", {})
-        username = UserCredentials.get("username", "")
-        password = UserCredentials.get("password", "")
-        credentials = (username, password)
-
-        # 读取需要的信息 - 网络稳定性检测参数
-        network_config = config.get("check_network_stability", {})
-        network_config_ping = network_config.get("with_ping", {})
-        network_config_http = network_config.get("with_http", {})
-        data = {"auth_server": auth_server}
-        type = ""
-        if network_config_ping.get("enabled", False):
-            target = network_config_ping.get("target", "202.89.233.100")
-            count = network_config_ping.get("count", 1)
-            loss_threshold = network_config_ping.get("loss_threshold", 0.0)
-            data = {"target": target,"count": count,"loss_threshold": loss_threshold}
-            type = "ping"
-        else:
-            network_config_ping = None
-            if network_config_http.get("enabled", False):
-                http_url = network_config_http.get("url", "http://connectivitycheck.platform.hicloud.com/generate_204")
-                timeout = network_config_http.get("timeout", 10)
-                data = {"http_url": http_url,"timeout": timeout}
-                type = "http"
-            else:
-                network_config_http = None
+        ssid, type, data = load_config_from_file()
         print("✔️核心线程配置导入完成")
         flag = 0
         while not stop_event.is_set():  # 关键！检查停止信号
@@ -484,12 +498,14 @@ def is_connected_wlan(SSID: str) -> bool:
                 creationflags= subprocess.CREATE_NO_WINDOW
             )
             
-            # 只检查是否有"已连接"状态
-            if result.returncode == 0 and "已连接" in result.stdout:
+            # 检查连接状态（兼容中英文系统语言）
+            if result.returncode == 0 and ("已连接" in result.stdout or re.search(r'\bconnected\b', result.stdout, re.IGNORECASE)):
                 for line in result.stdout.splitlines():
                     if re.match(r"^\s*SSID\s*:", line, flags=re.IGNORECASE):
                         ssid = line.split(":", 1)[1].strip()
                         print(f"✔️ 已连接无线局域网: {ssid}")
+                        if SSID == "":
+                            return True  # 没有指定SSID，默认通过ssid一致性校验
                         return ssid == SSID
             else : 
                 print("❌ 未连接到无线局域网,等待连接")

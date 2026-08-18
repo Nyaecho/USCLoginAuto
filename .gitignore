@@ -1,0 +1,25 @@
+# === 敏感信息（严禁入库）===
+config.json
+NetInformation/
+*.burp
+
+# === 构建产物 ===
+build/
+build-*/
+dist/
+*.exe
+*.dll
+smoke_result.txt
+
+# === Python 封存分支遗留 ===
+__pycache__/
+*.pyc
+
+# === IDE / 编辑器 ===
+.vscode/
+.idea/
+*.code-workspace
+
+# === 系统 ===
+Thumbs.db
+.DS_Store
