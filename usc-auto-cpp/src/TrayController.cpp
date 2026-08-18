@@ -32,7 +32,11 @@ TrayController::TrayController(QObject* parent) : QSystemTrayIcon(parent) {
 }
 
 QIcon TrayController::loadIcon() {
-    // 外部 icon.png 优先（对齐原版）
+    // 优先用 exe 内嵌资源图标（windowIcon 在 main 里从资源加载），
+    // 与应用程序图标天然一致；无资源时回退 icon.png / 占位图
+    if (!QApplication::windowIcon().isNull()) {
+        return QApplication::windowIcon();
+    }
     if (QFile::exists("icon.png")) {
         return QIcon("icon.png");
     }

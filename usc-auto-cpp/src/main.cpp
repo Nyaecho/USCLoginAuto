@@ -209,6 +209,10 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     QApplication::setQuitOnLastWindowClosed(false);  // 日志窗口关闭≠退出，托盘常驻
 
+    // 应用图标：Windows 下 Qt 自动从 exe 资源加载（app.rc 的 ICON），
+    // 显式设置 windowIcon 供托盘/窗口共用，保证与 exe 图标一致
+    app.setWindowIcon(QIcon(QApplication::applicationFilePath()));
+
     const std::string exeDir = QApplication::applicationDirPath().toStdString();
 
     for (int i = 1; i < argc; ++i) {

@@ -35,8 +35,7 @@ add_executable(usc-auto WIN32
   src/TrayController.cpp
   src/SingleInstance.cpp
   # 头文件必须列入目标，AUTOMOC 才会处理含 Q_OBJECT 的头（挪到 include/ 后必需）
-  include/exceptions.h
-  include/Logger.h
+  include/exceptions.h  include/Logger.h
   include/AppConfig.h
   include/WlanChecker.h
   include/NetworkMonitor.h
@@ -50,6 +49,20 @@ add_executable(usc-auto WIN32
 # 头文件目录（cpp 中 #include "Xxx.h" 直接引用，无需相对路径）
 # AUTOMOC 默认只扫源文件目录；include/ 路径让 moc 也能找到含 Q_OBJECT 的头文件
 target_include_directories(usc-auto BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# Windows 图标资源：windres 预编译为 .obj 再链接
+# （CMake 的 RC 集成在 MSYS2 空格路径下预处理器引号会丢失；自定义命令 + gcc 直接预处理已实测可行）
+if(WIN32)
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/app.rc.obj
+    COMMAND ${CMAKE_RC_COMPILER} -O coff
+            "--preprocessor=gcc -E -x assembler-with-cpp"
+            ${CMAKE_CURRENT_SOURCE_DIR}/app.rc
+            -o ${CMAKE_CURRENT_BINARY_DIR}/app.rc.obj
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/app.rc ${CMAKE_CURRENT_SOURCE_DIR}/app.ico
+    VERBATIM)
+  target_sources(usc-auto PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/app.rc.obj)
+endif()
 
 target_link_libraries(usc-auto PRIVATE
   Qt6::Widgets
