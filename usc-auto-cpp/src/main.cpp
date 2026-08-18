@@ -84,7 +84,10 @@ int runE2E(QApplication& app, const std::string& exeDir, int argc, char* argv[])
     }
 
     const bool withReauth = (argc >= 3 && std::string(argv[2]) == "--reauth");
-    const bool withFresh = (argc >= 4 && std::string(argv[3]) == "--fresh");
+    const bool withFresh = (argc >= 3 && std::string(argv[2]) == "--fresh") ||
+                           (argc >= 4 && std::string(argv[3]) == "--fresh");
+    const bool withPause = (argc >= 3 && std::string(argv[2]) == "--pause") ||
+                           (argc >= 4 && std::string(argv[3]) == "--pause");
     if (withFresh) {  // 必须在构造 CoreWorker（拷贝 cfg）之前清空
         cfg.cookie.clear();
         cfg.csrfToken.clear();
@@ -94,6 +97,11 @@ int runE2E(QApplication& app, const std::string& exeDir, int argc, char* argv[])
     QObject::connect(worker, &usc::CoreWorker::stopped, &app, &QCoreApplication::quit);
     if (withReauth) {
         QTimer::singleShot(3000, [worker]() { worker->requestReauth(); });
+    }
+    if (withPause) {
+        // 3s 后暂停 5 分钟，20s 后手动恢复（验证暂停生效+提前恢复），总时长 40s 内完成
+        QTimer::singleShot(3000, [worker]() { worker->requestPause(5); });
+        QTimer::singleShot(20000, [worker]() { worker->resume(); });
     }
     QTimer::singleShot(40000, worker, &usc::CoreWorker::requestStop);
     worker->start();
@@ -171,6 +179,14 @@ int runGui(QApplication& app, const std::string& exeDir, usc::SingleInstance& gu
     // 意图接线：GUI → 业务
     QObject::connect(logWindow, &usc::LogWindow::reauthRequested, worker,
                      &usc::CoreWorker::requestReauth);
+    QObject::connect(logWindow, &usc::LogWindow::pauseRequested, worker,
+                     &usc::CoreWorker::requestPause);
+    QObject::connect(logWindow, &usc::LogWindow::resumeRequested, worker,
+                     &usc::CoreWorker::resume);
+    // 倒计时同步：每次日志刷新时拉取 CoreWorker 暂停状态更新按钮显示
+    QObject::connect(logWindow, &usc::LogWindow::refreshTick, logWindow, [logWindow, worker]() {
+        logWindow->setPauseState(worker->isPaused(), worker->pauseRemainSec());
+    });
     auto doExit = [worker]() { shutdownApp(worker); };
     QObject::connect(logWindow, &usc::LogWindow::exitRequested, doExit);
     QObject::connect(tray, &usc::TrayController::exitRequested, doExit);

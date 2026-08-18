@@ -5,6 +5,7 @@
 #include "CoreWorker.h"
 
 #include <chrono>
+#include <ctime>
 #include <thread>
 
 #include "AuthClient.h"
@@ -64,6 +65,56 @@ bool CoreWorker::requestReauth() {
         m_sleepCv.notify_all();
     }
     return true;
+}
+
+void CoreWorker::requestPause(int minutes) {
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+    if (minutes <= 0) {
+        m_pauseUntil.store(-1);  // 无限期
+        log("检测已暂停（直到手动恢复）");
+    } else {
+        const std::int64_t until = now + minutes * 60LL;
+        m_pauseUntil.store(until);
+        std::time_t t = static_cast<std::time_t>(until);
+        std::tm tm{};
+        localtime_s(&tm, &t);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
+        log(std::string("检测已暂停 ") + std::to_string(minutes) + " 分钟（" + buf + " 自动恢复）");
+    }
+    // 唤醒主循环立即进入暂停分支
+    {
+        std::lock_guard<std::mutex> lock(m_sleepMutex);
+        m_sleepCv.notify_all();
+    }
+}
+
+void CoreWorker::resume() {
+    if (m_pauseUntil.load() != 0) {
+        m_pauseUntil.store(0);
+        log("检测已恢复");
+        std::lock_guard<std::mutex> lock(m_sleepMutex);
+        m_sleepCv.notify_all();
+    }
+}
+
+bool CoreWorker::isPaused() const {
+    const std::int64_t until = m_pauseUntil.load();
+    if (until == 0) return false;
+    if (until == -1) return true;
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+    return now < until;
+}
+
+std::int64_t CoreWorker::pauseRemainSec() const {
+    const std::int64_t until = m_pauseUntil.load();
+    if (until == 0) return 0;
+    if (until == -1) return -1;
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+    return until > now ? until - now : 0;
 }
 
 bool CoreWorker::sleepInterruptible(std::stop_token st, int seconds) {
@@ -137,6 +188,17 @@ void CoreWorker::mainLoop(std::stop_token st) {
     int flag = 0;
     while (!st.stop_requested()) {
         try {
+            // --- 检测暂停窗口：跳过检测，短轮询等到期/恢复/停止 ---
+            if (isPaused()) {
+                if (!sleepInterruptible(st, 30)) return;  // 30s 粒度检查到期
+                // 到期自然恢复（非手动 resume，后者已自行记日志）
+                if (!isPaused() && m_pauseUntil.load() == 0) {
+                    log("暂停到期，检测已恢复");
+                    flag = 0;
+                }
+                continue;  // 暂停中不执行任何检测（手动 reauth 在下方仍可触发）
+            }
+
             // --- 手动重新认证请求（对齐 GUI trigger_reauth 分支） ---
             if (m_reauthRequested.load()) {
                 log("已触发重新认证请求");

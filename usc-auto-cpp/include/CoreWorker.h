@@ -5,6 +5,7 @@
 #include <QObject>
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -29,6 +30,16 @@ public:
     // 返回 false = 已有一次在执行中（对齐 Python"别急!"）
     bool requestReauth();
 
+    // === 检测暂停（免打扰窗口）===
+    // 请求暂停 minutes 分钟（0 = 无限期，直到手动恢复）；覆盖旧暂停；线程安全
+    void requestPause(int minutes);
+    // 提前恢复检测
+    void resume();
+    // 当前是否处于暂停窗口
+    bool isPaused() const;
+    // 暂停剩余秒数（未暂停返回 0；无限期返回 -1）
+    std::int64_t pauseRemainSec() const;
+
 signals:
     // 工作线程正常退出
     void stopped();
@@ -52,6 +63,9 @@ private:
 
     std::jthread m_thread;
     std::atomic<bool> m_reauthRequested{false};
+
+    // 检测暂停：Unix 秒截止时间；0 = 未暂停；-1 = 无限期暂停
+    std::atomic<std::int64_t> m_pauseUntil{0};
 
     // 可中断 sleep 支持
     std::mutex m_sleepMutex;

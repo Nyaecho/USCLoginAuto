@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QFileDialog>
 #include <QFile>
+#include <QInputDialog>
 #include <QHBoxLayout>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -34,13 +35,16 @@ LogWindow::LogWindow(QWidget* parent) : QWidget(parent) {
 
     m_toggleBtn = new QPushButton("暂停自动刷新", btnFrame);
     auto* reauthBtn = new QPushButton("重新认证", btnFrame);
+    auto* pauseBtn = new QPushButton("暂停检测", btnFrame);
     auto* saveBtn = new QPushButton("保存日志为 TXT", btnFrame);
     auto* clearBtn = new QPushButton("清空日志", btnFrame);
     auto* exitBtn = new QPushButton("退出程序", btnFrame);
+    m_pauseBtn = pauseBtn;
     exitBtn->setStyleSheet("background-color:#ff6b6b; color:white;");
 
     btns->addWidget(m_toggleBtn);
     btns->addWidget(reauthBtn);
+    btns->addWidget(pauseBtn);
     btns->addWidget(saveBtn);
     btns->addWidget(clearBtn);
     btns->addStretch();
@@ -58,6 +62,7 @@ LogWindow::LogWindow(QWidget* parent) : QWidget(parent) {
 
     connect(m_toggleBtn, &QPushButton::clicked, this, &LogWindow::onToggleAutoRefresh);
     connect(reauthBtn, &QPushButton::clicked, this, [this]() { emit reauthRequested(); });
+    connect(pauseBtn, &QPushButton::clicked, this, &LogWindow::onPauseClicked);
     connect(saveBtn, &QPushButton::clicked, this, &LogWindow::onSaveLog);
     connect(clearBtn, &QPushButton::clicked, this, &LogWindow::onClearLog);
     connect(exitBtn, &QPushButton::clicked, this, &LogWindow::onExitClicked);
@@ -86,6 +91,7 @@ void LogWindow::onRefresh() {
     m_lastContentDirty = false;
     m_text->setPlainText(Logger::instance().content());
     m_text->verticalScrollBar()->setValue(m_text->verticalScrollBar()->maximum());
+    emit refreshTick();  // 供接线方同步暂停倒计时显示
 }
 
 void LogWindow::onToggleAutoRefresh() {
@@ -122,6 +128,49 @@ void LogWindow::onClearLog() {
 void LogWindow::onExitClicked() {
     if (QMessageBox::question(this, "确认退出", "确定要退出校园网守护程序吗？") == QMessageBox::Yes) {
         emit exitRequested();
+    }
+}
+
+void LogWindow::onPauseClicked() {
+    if (m_paused) {
+        emit resumeRequested();
+        return;
+    }
+    // 时长选择：预设 + 自定义 + 无限期
+    const QStringList items{"30 分钟", "60 分钟", "120 分钟", "自定义...", "直到手动恢复"};
+    bool ok = false;
+    const QString choice = QInputDialog::getItem(this, "暂停检测",
+                                                 "选择暂停时长（期间不检测网络状态）：", items, 0, false, &ok);
+    if (!ok) return;  // 取消
+
+    int minutes = 0;
+    if (choice == "30 分钟") minutes = 30;
+    else if (choice == "60 分钟") minutes = 60;
+    else if (choice == "120 分钟") minutes = 120;
+    else if (choice == "直到手动恢复") minutes = 0;
+    else {
+        bool numOk = false;
+        const int custom = QInputDialog::getInt(this, "自定义时长", "暂停分钟数：", 60, 1, 24 * 60, 1, &numOk);
+        if (!numOk) return;
+        minutes = custom;
+    }
+    emit pauseRequested(minutes);
+}
+
+void LogWindow::setPauseState(bool paused, std::int64_t remainSec) {
+    m_paused = paused;
+    if (!paused) {
+        m_pauseBtn->setText("暂停检测");
+        return;
+    }
+    if (remainSec < 0) {
+        m_pauseBtn->setText("恢复检测（无限期）");
+    } else {
+        const int mm = static_cast<int>(remainSec / 60);
+        const int ss = static_cast<int>(remainSec % 60);
+        m_pauseBtn->setText(QString("恢复检测（剩 %1:%2）")
+                                .arg(mm, 2, 10, QChar('0'))
+                                .arg(ss, 2, 10, QChar('0')));
     }
 }
 
