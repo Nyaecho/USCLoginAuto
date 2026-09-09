@@ -70,34 +70,81 @@ Credentials AuthClient::getCookieAndCsrf(const std::string& authServer) {
     return cred;
 }
 
-bool AuthClient::checkStatus(const std::string& authServer) {
+AccountStatus AuthClient::queryStatus(const std::string& authServer) {
+    AccountStatus st;
     cpr::Response r = cpr::Get(
         cpr::Url{"http://" + authServer + "/api/account/status"},
         cpr::Timeout{10 * 1000});
 
-    // 对齐原版：超时按"未连接"返回 false，不抛异常
     if (isNetworkError(r)) {
         if (r.error.code == cpr::ErrorCode::OPERATION_TIMEDOUT) {
             log("状态检测请求超时");
-            return false;
+            st.timedOut = true;  // 超时按"未在线"（对齐 checkStatus 语义）
+            return st;
         }
-        throw NetworkUnreachableException("状态检测网络错误: " + r.error.message);
+        st.error = "网络错误: " + r.error.message;
+        return st;
     }
     if (r.status_code != 200) {
-        throw GetStatusException("状态检测返回 HTTP " + std::to_string(r.status_code));
+        st.error = "服务器返回 HTTP " + std::to_string(r.status_code);
+        return st;
     }
 
     json data;
     try {
         data = json::parse(r.text);
     } catch (const json::parse_error&) {
-        throw GetStatusException("无法解析状态响应");
+        st.error = "响应不是有效 JSON";
+        return st;
     }
     const int code = data.value("code", -1);
     const std::string msg = data.value("msg", "");
-    if (code == 0 && msg == "在线") return true;
-    if (code == 1 && msg == "不在线") return false;
-    throw GetStatusException("未知的状态响应: code=" + std::to_string(code) + " msg=" + msg);
+    if (code == 0 && msg == "在线") {
+        st.online = true;
+    } else if (code == 1 && msg == "不在线") {
+        st.online = false;
+    } else {
+        st.error = "未知的状态响应: code=" + std::to_string(code) + " msg=" + msg;
+        return st;
+    }
+
+    // 解析 online 对象全字段（不在线时无此对象，字段保持默认）
+    if (st.online && data.contains("online") && data["online"].is_object()) {
+        const json& on = data["online"];
+        auto str = [&on](const char* key) {
+            return on.contains(key) && on[key].is_string() ? on[key].get<std::string>() : std::string{};
+        };
+        auto num = [&on](const char* key) {
+            // 服务器数字字段是字符串形式，需转换；失败按 0
+            if (!on.contains(key) || !on[key].is_string()) return 0LL;
+            try {
+                return std::stoll(on[key].get<std::string>());
+            } catch (const std::exception&) {
+                return 0LL;
+            }
+        };
+        st.name = str("Name");
+        st.username = str("Username");
+        st.ipv4 = str("UserIpv4");
+        st.ipv6 = str("UserIpv6");
+        st.mac = str("UserMac");
+        st.onlineSince = str("AddTime");
+        st.sessionId = str("SessionId");
+        st.bytesUp = num("BytesIn4") + num("BytesIn6");    // 服务器收到 = 用户上行
+        st.bytesDown = num("BytesOut4") + num("BytesOut6");  // 服务器发出 = 用户下行
+    }
+    st.valid = true;
+    return st;
+}
+
+bool AuthClient::checkStatus(const std::string& authServer) {
+    // 复用 queryStatus 的请求与判定，保持原有抛异常语义（供 mainLoop 分支决策）
+    AccountStatus st = queryStatus(authServer);
+    if (st.valid || st.timedOut) return st.online;  // 有效响应/超时均直接返回
+    if (st.error.rfind("网络错误", 0) == 0) {
+        throw NetworkUnreachableException("状态检测" + st.error);
+    }
+    throw GetStatusException(st.error);
 }
 
 bool AuthClient::logout(const std::string& authServer) {

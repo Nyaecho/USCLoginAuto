@@ -9,12 +9,14 @@
 #include "CoreWorker.h"
 #include "LogWindow.h"
 #include "Logger.h"
+#include "MainWindow.h"
 #include "NetworkMonitor.h"
 #include "SingleInstance.h"
 #include "TrayController.h"
 #include "WlanChecker.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QLabel>
 #include <QMessageBox>
 #include <QString>
@@ -172,32 +174,41 @@ int runGui(QApplication& app, const std::string& exeDir, usc::SingleInstance& gu
     auto* worker = new usc::CoreWorker(cfg, cfgPath);
     worker->start();
 
-    // --- 5. 渲染层：日志窗口 + 托盘 ---
-    auto* logWindow = new usc::LogWindow();
+    // --- 5. 渲染层：主窗口（状态主页 + 日志子页）+ 托盘 ---
+    auto* mainWindow = new usc::MainWindow();
     auto* tray = new usc::TrayController();
 
     // 意图接线：GUI → 业务
-    QObject::connect(logWindow, &usc::LogWindow::reauthRequested, worker,
+    QObject::connect(mainWindow, &usc::MainWindow::reauthRequested, worker,
                      &usc::CoreWorker::requestReauth);
-    QObject::connect(logWindow, &usc::LogWindow::pauseRequested, worker,
+    QObject::connect(mainWindow, &usc::MainWindow::pauseRequested, worker,
                      &usc::CoreWorker::requestPause);
-    QObject::connect(logWindow, &usc::LogWindow::resumeRequested, worker,
+    QObject::connect(mainWindow, &usc::MainWindow::resumeRequested, worker,
                      &usc::CoreWorker::resume);
-    // 倒计时同步：每次日志刷新时拉取 CoreWorker 暂停状态更新按钮显示
-    QObject::connect(logWindow, &usc::LogWindow::refreshTick, logWindow, [logWindow, worker]() {
-        logWindow->setPauseState(worker->isPaused(), worker->pauseRemainSec());
-    });
+    // 倒计时同步：每秒拉取 CoreWorker 暂停/下次检测状态回推 UI
+    QObject::connect(mainWindow, &usc::MainWindow::pollTick, mainWindow,
+                     [mainWindow, worker]() {
+                         mainWindow->setPauseAndTimers(worker->isPaused(),
+                                                       worker->pauseRemainSec(),
+                                                       worker->nextCheckRemainSec());
+                     });
     auto doExit = [worker]() { shutdownApp(worker); };
-    QObject::connect(logWindow, &usc::LogWindow::exitRequested, doExit);
+    QObject::connect(mainWindow, &usc::MainWindow::exitRequested, doExit);
     QObject::connect(tray, &usc::TrayController::exitRequested, doExit);
 
-    // 状态接线：托盘 → 日志窗口
-    QObject::connect(tray, &usc::TrayController::showLogRequested, logWindow,
-                     &usc::LogWindow::showAndActivate);
+    // 状态接线：业务 → GUI（工作线程发射，自动队列投递到主线程）
+    QObject::connect(worker, &usc::CoreWorker::netStateChanged, mainWindow,
+                     &usc::MainWindow::onStateChanged, Qt::QueuedConnection);
+    QObject::connect(worker, &usc::CoreWorker::accountStatusUpdated, mainWindow,
+                     &usc::MainWindow::onAccountStatus, Qt::QueuedConnection);
 
-    // 单实例激活：重复启动 exe 时弹出日志窗口
-    QObject::connect(&guard, &usc::SingleInstance::activationRequested, logWindow,
-                     &usc::LogWindow::showAndActivate);
+    // 状态接线：托盘 → 主窗口
+    QObject::connect(tray, &usc::TrayController::showMainRequested, mainWindow,
+                     &usc::MainWindow::showAndActivate);
+
+    // 单实例激活：重复启动 exe 时弹出主窗口
+    QObject::connect(&guard, &usc::SingleInstance::activationRequested, mainWindow,
+                     &usc::MainWindow::showAndActivate);
 
     usc::log("校园网守护程序已启动");
     return app.exec();
@@ -207,7 +218,10 @@ int runGui(QApplication& app, const std::string& exeDir, usc::SingleInstance& gu
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
-    QApplication::setQuitOnLastWindowClosed(false);  // 日志窗口关闭≠退出，托盘常驻
+    QApplication::setQuitOnLastWindowClosed(false);  // 主窗口关闭≠退出，托盘常驻
+
+    // AccountStatus 经队列连接跨线程投递（CoreWorker 工作线程 → GUI）需注册 metatype
+    qRegisterMetaType<usc::AccountStatus>("usc::AccountStatus");
 
     // 应用图标：Windows 下 Qt 自动从 exe 资源加载（app.rc 的 ICON），
     // 显式设置 windowIcon 供托盘/窗口共用，保证与 exe 图标一致

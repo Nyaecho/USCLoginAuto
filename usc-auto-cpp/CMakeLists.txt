@@ -32,6 +32,8 @@ add_executable(usc-auto WIN32
   src/AuthClient.cpp
   src/CoreWorker.cpp
   src/LogWindow.cpp
+  src/StatusPage.cpp
+  src/MainWindow.cpp
   src/TrayController.cpp
   src/SingleInstance.cpp
   # 头文件必须列入目标，AUTOMOC 才会处理含 Q_OBJECT 的头（挪到 include/ 后必需）
@@ -42,6 +44,8 @@ add_executable(usc-auto WIN32
   include/AuthClient.h
   include/CoreWorker.h
   include/LogWindow.h
+  include/StatusPage.h
+  include/MainWindow.h
   include/TrayController.h
   include/SingleInstance.h
 )

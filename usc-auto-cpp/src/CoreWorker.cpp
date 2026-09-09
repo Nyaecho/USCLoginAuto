@@ -16,6 +16,29 @@
 
 namespace usc {
 
+const char* netStateText(NetState s) {
+    switch (s) {
+        case NetState::Unknown:             return "等待首次检测";
+        case NetState::Connected:           return "已连接";
+        case NetState::ConnectedNoInternet: return "已连接但无互联网";
+        case NetState::Disconnected:        return "未连接";
+        case NetState::NotOnCampus:         return "未连接到校园网";
+    }
+    return "未知";
+}
+
+void CoreWorker::setNetState(NetState s, const QString& detail) {
+    // 仅在工作线程内调用，免锁安全；每次埋点都发射，历史去重由 GUI 按状态值变化处理
+    m_netState.store(s, std::memory_order_relaxed);
+    emit netStateChanged(static_cast<int>(s), detail);
+}
+
+void CoreWorker::publishAccountStatus() {
+    // 失败仅置无效态，不影响业务主流程（调用方仅在网络已验证可用时调用）
+    const AccountStatus st = AuthClient::queryStatus(m_cfg.authServer);
+    emit accountStatusUpdated(st);
+}
+
 CoreWorker::CoreWorker(AppConfig cfg, std::string configPath, QObject* parent)
     : QObject(parent),
       m_cfg(std::move(cfg)),
@@ -117,13 +140,26 @@ std::int64_t CoreWorker::pauseRemainSec() const {
     return until > now ? until - now : 0;
 }
 
+std::int64_t CoreWorker::nextCheckRemainSec() const {
+    const std::int64_t at = m_nextCheckAt.load();
+    if (at == 0) return 0;
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+    return at > now ? at - now : 0;
+}
+
 bool CoreWorker::sleepInterruptible(std::stop_token st, int seconds) {
     if (st.stop_requested()) return false;
+    // 记录下次检测时刻，供 GUI 倒计时（0 = 不适用：暂停/WLAN 等待分支不设）
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+    m_nextCheckAt.store(now + seconds);
     std::unique_lock<std::mutex> lock(m_sleepMutex);
     // 停止信号或 reauth 请求都会提前唤醒；reauth 唤醒后返回 true 让循环顶部处理请求
     m_sleepCv.wait_for(lock, std::chrono::seconds(seconds), [&st, this] {
         return st.stop_requested() || m_stopping.load() || m_reauthRequested.load();
     });
+    m_nextCheckAt.store(0);  // 醒来即检测/处理，倒计时不再适用
     return !st.stop_requested();  // false = 被停止打断，调用方应退出
 }
 
@@ -176,6 +212,8 @@ void CoreWorker::run(std::stop_token st) {
         log("核心线程配置导入完成");
     } catch (const std::exception& e) {
         log(std::string("启动失败: ") + e.what());
+        setNetState(NetState::Disconnected,
+                    QString::fromStdString(std::string("启动失败: ") + e.what()));
         emit stopped();
         return;
     }
@@ -190,6 +228,7 @@ void CoreWorker::mainLoop(std::stop_token st) {
         try {
             // --- 检测暂停窗口：跳过检测，短轮询等到期/恢复/停止 ---
             if (isPaused()) {
+                // 暂停不改写校园网状态（保持上次结果）；暂停信息由倒计时条/按钮展示
                 if (!sleepInterruptible(st, 30)) return;  // 30s 粒度检查到期
                 // 到期自然恢复（非手动 resume，后者已自行记日志）
                 if (!isPaused() && m_pauseUntil.load() == 0) {
@@ -201,6 +240,8 @@ void CoreWorker::mainLoop(std::stop_token st) {
 
             // --- 手动重新认证请求（对齐 GUI trigger_reauth 分支） ---
             if (m_reauthRequested.load()) {
+                // reauth 含 logout→login，期间互联网中断 → 按已连接但无互联网呈现
+                setNetState(NetState::ConnectedNoInternet, "手动重新认证");
                 log("已触发重新认证请求");
                 AuthClient::reAuth(m_cfg.authServer, m_cookie, m_csrfToken,
                                    m_cfg.username, m_cfg.password);
@@ -216,14 +257,17 @@ void CoreWorker::mainLoop(std::stop_token st) {
             }
             ++flag;
 
-            // --- 网络连通性检测 ---
+            // --- 网络连通性检测（检测中为过程态，不单独上报） ---
             bool stable;
             if (m_cfg.checkType == CheckType::Status) {
                 stable = AuthClient::checkStatus(m_cfg.authServer);  // 对齐原版 else 分支
+                if (stable) publishAccountStatus();  // 复用本次请求，避免双请求
             } else {
                 stable = NetworkMonitor::check(m_cfg);
+                if (stable) publishAccountStatus();  // 网络可用时补一次详情查询供 UI
             }
             if (stable) {
+                setNetState(NetState::Connected);
                 if (!sleepInterruptible(st, 60)) return;
                 continue;
             }
@@ -231,8 +275,9 @@ void CoreWorker::mainLoop(std::stop_token st) {
             // --- 网络不稳定 → 重认证流程 ---
             log("网络不稳定，尝试重新认证...");
             if (!WlanChecker::isConnected(m_cfg.targetSsid)) {
-                throw CheckWlanException();
+                throw CheckWlanException();  // → catch 记「未连接到校园网」
             }
+            setNetState(NetState::ConnectedNoInternet, "网络不稳定，重新认证中");
             if (!AuthClient::checkStatus(m_cfg.authServer)) {
                 log("认证失效，正在重新登录...");
                 doLogin();
@@ -244,19 +289,23 @@ void CoreWorker::mainLoop(std::stop_token st) {
 
         } catch (const CheckWlanException&) {
             // 对齐原版：死等 WLAN 恢复（每 60s 探测一次，期间响应停止）
+            setNetState(NetState::NotOnCampus, "未连接到目标 WLAN，等待重连");
             log("未连接到无线局域网，等待连接...");
             while (!st.stop_requested()) {
                 if (!sleepInterruptible(st, 60)) return;
                 if (WlanChecker::isConnected(m_cfg.targetSsid)) break;
             }
         } catch (const NetworkUnreachableException& e) {
+            setNetState(NetState::Disconnected, QString::fromStdString(e.what()));
             log(std::string("网络出现不可达错误，30s后重试: ") + e.what());
             if (!sleepInterruptible(st, 30)) return;
         } catch (const LoginException& e) {
+            setNetState(NetState::Disconnected, QString::fromStdString(e.what()));
             log(std::string("登录失败: 认证服务器不可达，10s后重试: ") + e.what());
             if (!sleepInterruptible(st, 10)) return;
         } catch (const std::exception& e) {
             // 兜底：任何未知异常不逃逸出线程（自愈，取代 guardian）
+            setNetState(NetState::Disconnected, QString::fromStdString(e.what()));
             log(std::string("出现预料之外的错误: ") + e.what());
             if (!sleepInterruptible(st, 30)) return;
         }

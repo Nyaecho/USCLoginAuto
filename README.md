@@ -8,17 +8,18 @@
 - 校园网认证状态监测，掉线自动重新认证（登出 → 重登）
 - 认证凭证（Cookie/CSRF Token）自动获取，超 7 天自动刷新并回写配置
 - WLAN 连接检测（原生 Windows WLAN API，不受系统语言影响）
-- 系统托盘常驻 + 日志窗口（自动刷新 / 保存 / 清空）
+- 系统托盘常驻 + 主窗口（实时状态主页：状态/倒计时/账号信息/状态历史；日志子页面：自动刷新 / 保存 / 清空）
 
 ## 架构（三层）
 
 ```
 启动：配置严格校验（不通过 → 弹窗报错退出）
   │
-  ├─ CoreWorker   唯一后台线程（std::jthread）：全部业务逻辑
+  ├─ CoreWorker   唯一后台线程（std::jthread）：全部业务逻辑 + 状态机埋点
   │                 检测 → 认证 → 重试时序，循环内自捕获异常自愈
+  │                 （stateChanged / accountStatusUpdated 信号供 GUI 订阅）
   │
-  └─ GUI          纯渲染层（主线程）：LogWindow 日志窗口 + TrayController 托盘
+  └─ GUI          纯渲染层（主线程）：MainWindow（状态主页 + 日志子页）+ TrayController 托盘
                     只订阅信号 / 转发用户意图，不含业务
 ```
 
@@ -26,14 +27,16 @@
 
 ```
 src/
-├── main.cpp           入口：校验前置 → SSID 校验 → CoreWorker → 托盘
-├── CoreWorker.h/cpp   后台工作线程（60s 检测循环 / reauth 防重入 / 可中断睡眠）
-├── AuthClient.h/cpp   认证 API（凭证获取/状态/登录/登出/重认证）
+├── main.cpp           入口：校验前置 → SSID 校验 → CoreWorker → 主窗口+托盘接线
+├── CoreWorker.h/cpp   后台工作线程（60s 检测循环 / reauth 防重入 / 可中断睡眠 / 状态机埋点）
+├── AuthClient.h/cpp   认证 API（凭证获取/状态/登录/登出/重认证 + AccountStatus 完整查询）
 ├── NetworkMonitor.h/cpp  HTTP/IcmpSendEcho 连通性检测
 ├── WlanChecker.h/cpp  原生 WLAN API SSID 检测
 ├── AppConfig.h/cpp    config.json 加载/严格校验/回写
 ├── Logger.h/cpp       环形日志缓冲（10MB）
-├── LogWindow.h/cpp    日志窗口
+├── MainWindow.h/cpp   主窗口（QTabWidget：「状态」主页 +「日志」子页）
+├── StatusPage.h/cpp   状态主页（状态大图标/倒计时/账号信息/状态历史/控制按钮）
+├── LogWindow.h/cpp    日志子页面（自动刷新 / 保存 / 清空）
 ├── TrayController.h/cpp 系统托盘
 └── exceptions.h       异常层次
 ```

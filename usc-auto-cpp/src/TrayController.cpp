@@ -15,17 +15,17 @@ TrayController::TrayController(QObject* parent) : QSystemTrayIcon(parent) {
 
     auto* menu = new QMenu();
     // default=true：双击图标触发（对齐原版 pystray default=True）
-    auto* showAction = menu->addAction("显示日志");
+    auto* showAction = menu->addAction("打开主界面");
     menu->setDefaultAction(showAction);  // 粗体默认项
     menu->addSeparator();
     menu->addAction("退出", this, &TrayController::exitRequested);
 
     setContextMenu(menu);
-    connect(showAction, &QAction::triggered, this, &TrayController::showLogRequested);
-    // 激活（双击/单击按系统约定）也显示日志
+    connect(showAction, &QAction::triggered, this, &TrayController::showMainRequested);
+    // 激活（双击/单击按系统约定）也打开主界面
     connect(this, &QSystemTrayIcon::activated, this, [this](ActivationReason reason) {
         if (reason == DoubleClick || reason == Trigger) {
-            emit showLogRequested();
+            emit showMainRequested();
         }
     });
     show();

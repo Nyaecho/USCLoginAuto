@@ -16,8 +16,8 @@ public:
     static QIcon loadIcon();
 
 signals:
-    void showLogRequested();  // 菜单"显示日志"或双击图标
-    void exitRequested();     // 菜单"退出"
+    void showMainRequested();  // 菜单"打开主界面"或双击图标（默认切到状态页）
+    void exitRequested();      // 菜单"退出"
 };
 
 }  // namespace usc
