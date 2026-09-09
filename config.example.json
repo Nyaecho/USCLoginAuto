@@ -1,0 +1,28 @@
+{
+  "target_ssid": "",
+  "auth_server": "210.43.112.9",
+  "UserCredentials": {
+    "username": "your_username_here",
+    "password": "your_password_here"
+  },
+  "check_network_stability": {
+    "with_ping": {
+      "enabled": false,
+      "tips": "这里存放检测网络连通性需要的参数，依次为 ping目标，ping次数，可以接受的丢包率百分比",
+      "target": "202.89.233.100",
+      "count": 10,
+      "loss_threshold": 50.0
+    },
+    "with_http": {
+      "enabled": true,
+      "tips": "这里存放检测网络连通性需要的参数，依次为 目标URL，超时时间（秒）",
+      "target_url": "http://connectivitycheck.platform.hicloud.com/generate_204",
+      "timeout": 5
+    }
+  },
+  "key": {
+    "cookie": "这里会自动获取",
+    "csrf_token": "这里会自动获取",
+    "LastUpdate": "1999-01-01 00:00:00"
+  }
+}

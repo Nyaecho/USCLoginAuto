@@ -59,8 +59,8 @@ cmake --build build
 
 ## 使用
 
-1. 将 `config.json` 放到 exe 同目录（首次运行会生成模板）
-2. 填写认证服务器、账号密码；检测方式按需启用 ping/HTTP
+1. 复制 `config.example.json` 为 `config.json` 放到 exe 同目录（或首次运行自动生成模板）
+2. 填写认证服务器、账号密码；检测方式按需启用 ping/HTTP（`key` 区会自动获取回写，无需手填）
 3. 运行 exe → 托盘常驻，双击图标查看日志
 
 ## 配置说明（config.json）
